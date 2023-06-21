@@ -1,0 +1,5 @@
+[installer]
+modern-installation = false
+
+[virtualenvs]
+in-project = true

@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "gpt-assisstant"
+version = "0.1.0"
+description = ""
+authors = ["zhengyu <lizhengyu419@outlook.com>"]
+readme = "README.md"
+packages = [{include = "gpt_assisstant"}]
+
+[tool.poetry.dependencies]
+python = "^3.8.1"
+unstructured = "^0.7.7"
+langchain = "^0.0.207"
+faiss-cpu = "^1.7.4"
+tiktoken = "^0.4.0"
+openai = "^0.27.8"
+tqdm = "^4.65.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
