@@ -27,13 +27,17 @@ import logging
 import os
 import shutil
 
+import langchain
 import openai
 from langchain import OpenAI
-from langchain.chains import RetrievalQA
+from langchain.chains import LLMChain, RetrievalQA
 from langchain.chains.summarize import load_summarize_chain
 from langchain.document_loaders.unstructured import UnstructuredFileLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.input import get_colored_text
+from langchain.prompts import PromptTemplate
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.vectorstores.base import VectorStoreRetriever
@@ -42,6 +46,7 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger("gpt_assisstant")
 
+langchain.verbose = True
 openai.proxy = os.environ.get("http_proxy")
 
 
@@ -147,17 +152,24 @@ def summarize_doc(file_path):
 
 
 def ask(query):
-    llm = OpenAI(max_tokens=1500)
+    llm = OpenAI(temperature=0, max_tokens=1500)
     lfs = LocalFaissStore()
     print("Question: {question}".format(question=get_colored_text(query, "green")))
     colored_answer = ""
     if not lfs.is_empty():
         retriever = VectorStoreRetriever(vectorstore=lfs.db)
-        retrievalQA = RetrievalQA.from_llm(llm=llm, retriever=retriever)
-        result = retrievalQA({"query": query})
-        colored_answer = get_colored_text(result["result"].strip(), "green")
+        compressor = LLMChainExtractor.from_llm(llm)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, base_retriever=retriever
+        )
+        retrievalQA = RetrievalQA.from_llm(llm=llm, retriever=compression_retriever)
+        result = retrievalQA(query)["result"].strip()
+        colored_answer = get_colored_text(result, "green")
     else:
-        colored_answer = get_colored_text(llm.predict(query).strip(), "green")
+        prompt = PromptTemplate.from_template(query)
+        llm_chain = LLMChain(llm=llm, prompt=prompt)
+        result = llm_chain.predict().strip()
+        colored_answer = get_colored_text(result, "green")
 
     print(f"Response: {colored_answer}")
 
