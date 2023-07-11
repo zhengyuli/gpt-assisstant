@@ -33,7 +33,7 @@ from langchain import OpenAI
 from langchain.chains import LLMChain, RetrievalQA
 from langchain.chains.summarize import load_summarize_chain
 from langchain.document_loaders.unstructured import UnstructuredFileLoader
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain.input import get_colored_text
 from langchain.prompts import PromptTemplate
 from langchain.retrievers import ContextualCompressionRetriever
@@ -60,9 +60,7 @@ class LocalFaissStore:
             os.mkdir(self.store_path)
 
         self.index_name = index_name
-        self.embedding = OpenAIEmbeddings(
-            model="text-embedding-ada-002", max_retries=10
-        )
+        self.embedding = HuggingFaceEmbeddings()
         try:
             self.db = FAISS.load_local(self.store_path, self.embedding, index_name)
         except:
