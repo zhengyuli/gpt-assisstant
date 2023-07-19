@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 
 import langchain
@@ -128,10 +129,18 @@ class LocalFaissStore:
 
         self.db.save_local(self.store_path, self.index_name)
 
+    def similarity_search(self, query):
+        return self.db.similarity_search_with_score(query)
+
 
 def index_docs(path):
     lfs = LocalFaissStore()
     lfs.add_docs(path)
+
+
+def clear_index():
+    lfs = LocalFaissStore()
+    lfs.clear_all()
 
 
 def summarize_doc(file_path):
@@ -172,20 +181,36 @@ def ask(query):
     print(f"Response: {colored_answer}")
 
 
+def similarity_search(query):
+    lfs = LocalFaissStore()
+
+    contents = sorted(lfs.similarity_search(query), key=lambda x: x[1], reverse=True)
+    for index, content in enumerate(contents):
+        prefix = get_colored_text(f"Result-{index}", "red")
+        page_content = get_colored_text(
+            re.sub(r"[\s\n]+", " ", content[0].page_content.strip()), "green"
+        )
+        score = get_colored_text(f"score: {content[1]}", "yellow")
+        print(f"{prefix}: {page_content} -- {score}")
+
+
 def argument_parser():
     parser = argparse.ArgumentParser(description="GPT Assisstant")
     subparsers = parser.add_subparsers(dest="command", help="Sub-command help")
 
-    # Index-docs command
-    summarize_parser = subparsers.add_parser(
+    # Index docs command
+    index_docs_parser = subparsers.add_parser(
         "index-docs",
         help="Index documents, it supports to index a directory or a file.",
     )
-    summarize_parser.add_argument(
+    index_docs_parser.add_argument(
         "path", type=str, help="File/Directory path to index."
     )
 
-    # Summarize-doc command
+    # Clear index command
+    subparsers.add_parser("clear-index", help="Clear documents index.")
+
+    # Summarize doc command
     summarize_parser = subparsers.add_parser(
         "summarize-doc", help="Summarize document, it supports lots of file types."
     )
@@ -195,6 +220,14 @@ def argument_parser():
     query_parser = subparsers.add_parser("ask", help="Ask question.")
     query_parser.add_argument("query", type=str, help="The question to ask.")
 
+    # Similarity search command
+    similarity_search_parser = subparsers.add_parser(
+        "similarity-search", help="Similarity content search."
+    )
+    similarity_search_parser.add_argument(
+        "query", type=str, help="The query to search."
+    )
+
     return parser
 
 
@@ -203,10 +236,14 @@ def main() -> None:
     args = args_parser.parse_args()
     if args.command == "index-docs":
         index_docs(args.path)
+    elif args.command == "clear-index":
+        clear_index()
     elif args.command == "summarize-doc":
         summarize_doc(args.file_path)
     elif args.command == "ask":
         ask(args.query)
+    elif args.command == "similarity-search":
+        similarity_search(args.query)
     else:
         args_parser.print_help()
 
