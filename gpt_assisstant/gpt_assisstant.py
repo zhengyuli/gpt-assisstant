@@ -71,39 +71,44 @@ class LocalFaissStore:
             with open(self.index_hash_path, "r") as f:
                 self.index_hash = json.load(f)
         else:
-            self.index_hash = {index_name: []}
+            self.index_hash = {index_name: {}}
 
     def is_empty(self):
         return True if self.db is None else False
 
     def clear_all(self):
         self.db = None
-        self.index_hash = {self.index_name: []}
+        self.index_hash = {self.index_name: {}}
         shutil.rmtree(self.store_path)
         os.mkdir(self.store_path)
 
     def add_docs(self, base_dir):
         new_docs = []
 
+        all_files = []
         if os.path.isfile(base_dir):
             if any(fnmatch.fnmatch(base_dir, p) for p in self.supported_suffixes):
-                new_docs.append(base_dir)
+                all_files.append(base_dir)
         else:
             for root, dirs, files in os.walk(base_dir):
-                for matched_file in [
-                    f
+                matched_files = [
+                    os.path.join(root, f)
                     for f in files
                     if any(fnmatch.fnmatch(f, p) for p in self.supported_suffixes)
-                ]:
-                    new_file_path = os.path.join(root, matched_file)
-                    with open(new_file_path, "rb") as f:
-                        hash_hex = hashlib.md5(f.read()).hexdigest()
-                        if hash_hex not in self.index_hash[self.index_name]:
-                            self.index_hash[self.index_name].append(hash_hex)
-                            new_docs.append(new_file_path)
-                            logger.info(
-                                f"Find a new doc, path: {new_file_path}, hash: {hash_hex}."
-                            )
+                ]
+                all_files += matched_files
+
+        for new_file in all_files:
+            with open(new_file, "rb") as f:
+                hash_hex = hashlib.md5(f.read()).hexdigest()
+                if hash_hex not in self.index_hash[self.index_name]:
+                    self.index_hash[self.index_name][hash_hex] = new_file
+                    new_docs.append(new_file)
+                    logger.info(f"Find a new doc, path: {new_file}, hash: {hash_hex}.")
+                else:
+                    logger.info(
+                        f"Duplicated doc, path: {new_file}, hash: {hash_hex}, this doc has been indexed before."
+                    )
 
         if new_docs:
             logger.info("Indexing begin... .. .!")
@@ -130,10 +135,11 @@ class LocalFaissStore:
         self.db.save_local(self.store_path, self.index_name)
 
     def similarity_search(self, query):
-        return self.db.similarity_search_with_score(query)
+        return self.db.similarity_search_with_relevance_scores(query)
 
 
 def index_docs(path):
+    logger.setLevel(logging.INFO)
     lfs = LocalFaissStore()
     lfs.add_docs(path)
 
@@ -159,7 +165,7 @@ def summarize_doc(file_path):
 
 
 def ask(query):
-    llm = OpenAI(temperature=0, max_tokens=1500)
+    llm = OpenAI(max_tokens=1500)
     lfs = LocalFaissStore()
     print("Question: {question}".format(question=get_colored_text(query, "green")))
     colored_answer = ""
@@ -178,7 +184,45 @@ def ask(query):
         result = llm_chain.predict().strip()
         colored_answer = get_colored_text(result, "green")
 
-    print(f"Response: {colored_answer}")
+    print(f"\nResponse: {colored_answer}\n\n")
+
+
+def chat():
+    llm = OpenAI(max_tokens=1500)
+    lfs = LocalFaissStore()
+    if not lfs.is_empty():
+        retriever = VectorStoreRetriever(vectorstore=lfs.db)
+        compressor = LLMChainExtractor.from_llm(llm)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, base_retriever=retriever
+        )
+        retrievalQA = RetrievalQA.from_llm(llm=llm, retriever=compression_retriever)
+
+    print(
+        get_colored_text(
+            "Chat Mode: type in any questions you want to ask, or exit command to exit chat mode!",
+            "yellow",
+        )
+    )
+    while True:
+        try:
+            query = input("Enter your question: ")
+        except KeyboardInterrupt:
+            break
+
+        if query == "exit":
+            break
+
+        if not lfs.is_empty():
+            result = retrievalQA(query)["result"].strip()
+            colored_answer = get_colored_text(result, "green")
+        else:
+            result = llm.predict().strip()
+            colored_answer = get_colored_text(result, "green")
+
+        print(f"\nResponse: {colored_answer}\n")
+
+    print(get_colored_text("\nExit chat mode!", "yellow"))
 
 
 def similarity_search(query):
@@ -220,6 +264,9 @@ def argument_parser():
     query_parser = subparsers.add_parser("ask", help="Ask question.")
     query_parser.add_argument("query", type=str, help="The question to ask.")
 
+    # Chat command
+    query_parser = subparsers.add_parser("chat", help="Chat mode.")
+
     # Similarity search command
     similarity_search_parser = subparsers.add_parser(
         "similarity-search", help="Similarity content search."
@@ -242,6 +289,8 @@ def main() -> None:
         summarize_doc(args.file_path)
     elif args.command == "ask":
         ask(args.query)
+    elif args.command == "chat":
+        chat()
     elif args.command == "similarity-search":
         similarity_search(args.query)
     else:
